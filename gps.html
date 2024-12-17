@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Blackswan Tracking Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.7.1/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.7.1/dist/leaflet.css"/>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            background-color: #f4f7f6;
+        }
+        .dashboard-card {
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            padding: 20px;
+        }
+        #map {
+            height: 400px;
+            width: 100%;
+        }
+        .info-box {
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid py-4">
+        <h1 class="text-center mb-4"> Blackswan GPS Tracking Dashboard</h1>
+        
+        <div class="row">
+            <!-- Live Location Card -->
+            <div class="col-md-8">
+                <div class="dashboard-card">
+                    <h3>Live Location</h3>
+                    <div id="map"></div>
+                </div>
+            </div>
+            
+            <!-- Device Info Card -->
+            <div class="col-md-4">
+                <div class="dashboard-card">
+                    <h3>Device Details</h3>
+                    <div class="info-box">
+                        <strong>Latitude:</strong> <span id="latValue">-</span><br>
+                        <strong>Longitude:</strong> <span id="lngValue">-</span><br>
+                        <strong>Speed:</strong> <span id="speedValue">-</span> km/h<br>
+                        <strong>Last Updated:</strong> <span id="timestampValue">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- Historical Data Chart -->
+            <div class="col-md-8">
+                <div class="dashboard-card">
+                    <h3>Speed History</h3>
+                    <canvas id="speedChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Location History -->
+            <div class="col-md-4">
+                <div class="dashboard-card">
+                    <h3>Recent Locations</h3>
+                    <div id="locationHistory"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ThingSpeak Configuration
+        const CHANNEL_ID = '2533203';
+        const API_KEY = 'HR9026POI7QOT40Z';
+        const LATITUDE_FIELD = 1;
+        const LONGITUDE_FIELD = 2;
+        const SPEED_FIELD = 3;
+
+        // Initialize map
+        var map = L.map('map').setView([0, 0], 2);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Marker for tracking
+        var deviceMarker = L.marker([0, 0]).addTo(map);
+
+        // Speed Chart
+        var speedChart = new Chart(document.getElementById('speedChart'), {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Speed (km/h)',
+                    data: [],
+                    borderColor: 'blue',
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        function fetchThingSpeakData() {
+            // Fetch latest data
+            const latestUrl = `https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds/last.json?api_key=${API_KEY}`;
+            
+            // Fetch historical data
+            const historyUrl = `https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds.json?api_key=${API_KEY}&results=20`;
+
+            // Latest Data Fetch
+            fetch(latestUrl)
+                .then(response => response.json())
+                .then(data => {
+                    const lat = parseFloat(data[`field${LATITUDE_FIELD}`]);
+                    const lng = parseFloat(data[`field${LONGITUDE_FIELD}`]);
+                    const speed = parseFloat(data[`field${SPEED_FIELD}`]) || 0;
+
+                    // Update map
+                    map.setView([lat, lng], 15);
+                    deviceMarker.setLatLng([lat, lng]);
+
+                    // Update device info
+                    document.getElementById('latValue').textContent = lat.toFixed(6);
+                    document.getElementById('lngValue').textContent = lng.toFixed(6);
+                    document.getElementById('speedValue').textContent = speed.toFixed(2);
+                    document.getElementById('timestampValue').textContent = new Date(data.created_at).toLocaleString();
+                });
+
+            // Historical Data Fetch
+            fetch(historyUrl)
+                .then(response => response.json())
+                .then(data => {
+                    const feeds = data.feeds;
+                    
+                    // Update Speed Chart
+                    const labels = feeds.map(feed => new Date(feed.created_at).toLocaleTimeString());
+                    const speedData = feeds.map(feed => parseFloat(feed[`field${SPEED_FIELD}`]) || 0);
+
+                    speedChart.data.labels = labels;
+                    speedChart.data.datasets[0].data = speedData;
+                    speedChart.update();
+
+                    // Update Location History
+                    const locationHistoryEl = document.getElementById('locationHistory');
+                    locationHistoryEl.innerHTML = feeds.slice(0, 5).map(feed => `
+                        <div class="mb-2 p-2 border rounded">
+                            <small>${new Date(feed.created_at).toLocaleString()}</small><br>
+                            Lat: ${parseFloat(feed[`field${LATITUDE_FIELD}`]).toFixed(4)}, 
+                            Lng: ${parseFloat(feed[`field${LONGITUDE_FIELD}`]).toFixed(4)}
+                        </div>
+                    `).join('');
+                })
+                .catch(error => {
+                    console.error('Error fetching ThingSpeak data:', error);
+                });
+        }
+
+        // Initial fetch and set up periodic updates
+        fetchThingSpeakData();
+        setInterval(fetchThingSpeakData, 30000); // Update every 30 seconds
+    </script>
+</body>
+</html>

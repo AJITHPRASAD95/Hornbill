@@ -1,0 +1,10 @@
+runtime: python39  # Specifies the Python 3.9 runtime
+entrypoint: serve -s .
+
+handlers:
+  - url: /
+    static_files: index.html
+    upload: index.html
+  - url: /(.+)
+    static_files: \1
+    upload: (.*)
